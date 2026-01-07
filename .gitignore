@@ -1,0 +1,54 @@
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build
+bin/
+obj/
+out/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp
+*.tmp
+*.temp
+*.swp
+
+# Archives (don't commit old docs)
+_archive/
+
+# Configuration files with credentials
+Distribution/Configuration/email-settings.json
+Distribution/Configuration/server-access.json
+Distribution/Configuration/modernuo.json
+
+# Runtime data and saves
+Distribution/Saves/
+Distribution/Backups/
+Distribution/Archives/
+Distribution/Logs/
+Distribution/temp/
+
+# Build outputs in Distribution
+Distribution/*.dll
+Distribution/*.exe
+Distribution/*.pdb
+Distribution/*.xml
+Distribution/Assemblies/
+
+# Crash and network logs
+Distribution/*.log
+
+# Keep Data folder (static game content)
+!Distribution/Data/

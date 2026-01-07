@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "fromAddress": "support@example.com",
+  "fromName": "Server Team",
+  "crashAddress": "crashes@example.com",
+  "crashName": "Crash Log",
+  "speechLogPageAddress": "support@example.com",
+  "speechLogPageName": "GM Support Conversation",
+  "emailServer": "smtp.gmail.com",
+  "emailPort": 465,
+  "emailUsername": "your-email@example.com",
+  "emailPassword": "YOUR_EMAIL_PASSWORD_HERE",
+  "emailSendRetryCount": 5,
+  "emailSendRetryDelay": 3
+}
