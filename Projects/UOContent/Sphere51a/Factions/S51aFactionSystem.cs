@@ -65,23 +65,33 @@ namespace Server.Sphere51a.Factions
         }
 
         /// <summary>
-        /// Load all guild factions from PostgreSQL into memory cache.
+        /// Load all guild factions from database into memory cache.
+        /// Uses the configured database provider (SQLite or PostgreSQL).
         /// </summary>
         private static void LoadAllFactions()
         {
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
+            if (repo == null)
+            {
+                Utility.PushColor(ConsoleColor.Yellow);
+                Console.WriteLine("[Sphere51a] WARNING: No database repository configured - factions will not persist");
+                Utility.PopColor();
+                return;
+            }
+
             lock (_cacheLock)
             {
                 _cache.Clear();
 
-                Console.WriteLine("[Sphere51a] Loading guild factions from database...");
+                Console.WriteLine($"[Sphere51a] Loading guild factions from {repo.ProviderName}...");
 
                 foreach (var faction in S51aFaction.AllFactions)
                 {
-                    var guildSerials = FactionRepository.GetFactionGuilds(faction.FactionId);
+                    var guildSerials = repo.GetFactionGuilds(faction.FactionId);
 
                     foreach (var serial in guildSerials)
                     {
-                        var info = FactionRepository.GetGuildFaction(serial);
+                        var info = repo.GetGuildFaction(serial);
                         if (info != null)
                         {
                             _cache[serial] = info;
@@ -96,7 +106,10 @@ namespace Server.Sphere51a.Factions
         /// </summary>
         private static void PrintFactionStatistics()
         {
-            var stats = FactionRepository.GetFactionStatistics();
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
+            if (repo == null) return;
+
+            var stats = repo.GetFactionStatistics();
 
             Console.WriteLine("[Sphere51a] Faction Statistics:");
             Console.WriteLine($"  - The Golden Shield: {stats[1]} guild(s)");
@@ -252,15 +265,22 @@ namespace Server.Sphere51a.Factions
                 }
             }
 
-            // Write to PostgreSQL (source of truth)
-            if (!FactionRepository.SetGuildFaction(guild.Serial, faction.FactionId))
+            // Write to database (source of truth)
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
+            if (repo == null)
+            {
+                errorMessage = "Database not configured";
+                return false;
+            }
+
+            if (!repo.SetGuildFaction(guild.Serial, faction.FactionId))
             {
                 errorMessage = "Database error - faction assignment failed";
                 return false;
             }
 
-            // Reload from PostgreSQL to get accurate timestamps
-            var newInfo = FactionRepository.GetGuildFaction(guild.Serial);
+            // Reload from database to get accurate timestamps
+            var newInfo = repo.GetGuildFaction(guild.Serial);
             if (newInfo == null)
             {
                 errorMessage = "Database error - unable to verify faction assignment";
@@ -319,8 +339,15 @@ namespace Server.Sphere51a.Factions
                 }
             }
 
-            // Delete from PostgreSQL
-            if (!FactionRepository.RemoveGuildFaction(guild.Serial))
+            // Delete from database
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
+            if (repo == null)
+            {
+                errorMessage = "Database not configured";
+                return false;
+            }
+
+            if (!repo.RemoveGuildFaction(guild.Serial))
             {
                 errorMessage = "Database error - faction removal failed";
                 return false;
@@ -376,7 +403,11 @@ namespace Server.Sphere51a.Factions
             if (faction == null)
                 return new List<Serial>();
 
-            return FactionRepository.GetFactionGuilds(faction.FactionId);
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
+            if (repo == null)
+                return new List<Serial>();
+
+            return repo.GetFactionGuilds(faction.FactionId);
         }
 
         /// <summary>
@@ -385,8 +416,17 @@ namespace Server.Sphere51a.Factions
         /// <returns>Dictionary: Faction -> Guild Count</returns>
         public static Dictionary<S51aFaction, int> GetStatistics()
         {
-            var dbStats = FactionRepository.GetFactionStatistics();
+            var repo = Server.Sphere51a.Core.S51aConfig.FactionRepository;
             var stats = new Dictionary<S51aFaction, int>();
+
+            if (repo == null)
+            {
+                foreach (var faction in S51aFaction.AllFactions)
+                    stats[faction] = 0;
+                return stats;
+            }
+
+            var dbStats = repo.GetFactionStatistics();
 
             foreach (var faction in S51aFaction.AllFactions)
             {

@@ -183,20 +183,10 @@ namespace Server.Engines.ConPVP
             if (mobile == null || mobile.Deleted)
                 return;
 
-            // Remove all stat modifications (buffs/debuffs)
-            mobile.RemoveStatMod("[Magic] Str Offset");
-            mobile.RemoveStatMod("[Magic] Dex Offset");
-            mobile.RemoveStatMod("[Magic] Int Offset");
-
-            // Remove spell-specific stat mods
-            mobile.RemoveStatMod("Strength");
-            mobile.RemoveStatMod("Agility");
-            mobile.RemoveStatMod("Cunning");
-            mobile.RemoveStatMod("Bless");
-            mobile.RemoveStatMod("Curse");
-            mobile.RemoveStatMod("Weaken");
-            mobile.RemoveStatMod("Clumsy");
-            mobile.RemoveStatMod("Feeblemind");
+            // Use GlobalStatController to properly remove ALL stat modifications
+            // This handles: Bless, Curse, Strength, Agility, Cunning, Weaken, Clumsy, Feeblemind
+            // Including the [Magic] Str/Dex/Int Global mods that Curse/Bless apply
+            GlobalStatController.ClearAllStatEffects(mobile);
 
             // Clear poison
             if (mobile.Poisoned)
@@ -312,18 +302,33 @@ namespace Server.Engines.ConPVP
         {
             if (!_started) return;
 
-            // Clear aggression flags before ending
-            RemoveAggressions();
-
             // Send timeout messages
             _challenger.SendMessage("Duel ended in a draw due to time limit!");
             _challenged.SendMessage("Duel ended in a draw due to time limit!");
 
-            // Restore and return
-            RestoreAndReturnPlayers();
+            // Add 2 second delay before restoration (matches OnPlayerDeath pattern)
+            // This prevents equipment loss by giving time for item parent-child relationships to stabilize
+            Timer.DelayCall(TimeSpan.FromSeconds(2.0), () =>
+            {
+                // Clear buffs/debuffs to ensure proper equipment restoration
+                ClearAllBuffs(_challenger);
+                ClearAllBuffs(_challenged);
 
-            // Clean up
-            Cancel();
+                // Cancel any active spells
+                if (_challenger.Spell is Spell challengerSpell && challengerSpell.IsCasting)
+                    challengerSpell.Disturb(DisturbType.Hurt, false, true);
+                if (_challenged.Spell is Spell challengedSpell && challengedSpell.IsCasting)
+                    challengedSpell.Disturb(DisturbType.Hurt, false, true);
+
+                // Clear aggression flags before ending
+                RemoveAggressions();
+
+                // Restore equipment and return players to original locations
+                RestoreAndReturnPlayers();
+
+                // Clean up session
+                Cancel();
+            });
         }
 
         public void OnPlayerDeath(Mobile victim, Mobile killer)

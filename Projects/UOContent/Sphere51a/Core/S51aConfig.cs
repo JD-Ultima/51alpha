@@ -3,24 +3,44 @@
 // =====================================================
 // File: S51aConfig.cs
 // Created: 2025-12-14
+// Updated: 2025-01-13 - Added SQLite support for local development
 // Phase: Phase 1 - Three-Faction System Foundation
-// Documentation: PHASE1_VERIFICATION_REPORT_v3.md (Q1: Week 1 lockout)
-//                PHASES_2-6_QUESTIONNAIRE_FILLED.md (P2-Q2: Server launch date)
 // =====================================================
 
 using System;
 using System.IO;
 using Server.Sphere51a.Core.Database;
-using Npgsql;
 
 namespace Server.Sphere51a.Core
 {
     /// <summary>
+    /// Database provider selection.
+    /// </summary>
+    public enum DatabaseProvider
+    {
+        /// <summary>SQLite - Local development, no installation needed</summary>
+        SQLite,
+        /// <summary>PostgreSQL - Production server with multiple players</summary>
+        PostgreSQL
+    }
+
+    /// <summary>
     /// Sphere51a server configuration.
-    /// Loads configuration from PostgreSQL s51a_config table.
+    /// Supports SQLite (development) and PostgreSQL (production).
     /// </summary>
     public static class S51aConfig
     {
+        /// <summary>
+        /// Current database provider.
+        /// </summary>
+        public static DatabaseProvider Provider { get; private set; } = DatabaseProvider.SQLite;
+
+        /// <summary>
+        /// The active faction repository instance.
+        /// Use this for all database operations.
+        /// </summary>
+        public static IFactionRepository FactionRepository { get; private set; }
+
         /// <summary>
         /// Server launch date (first startup timestamp).
         /// Used for Week 1 faction change lockout.
@@ -35,15 +55,14 @@ namespace Server.Sphere51a.Core
 
         /// <summary>
         /// Enable equipment double-click swap feature.
-        /// Allows players to double-click items in backpack or ground (within 2 tiles) to equip.
         /// </summary>
         public static bool EquipmentSwapEnabled => true;
 
         private static bool _isInitialized = false;
+        private static string _launchDateFile;
 
         /// <summary>
         /// Initialize Sphere51a configuration.
-        /// Loads server launch date from PostgreSQL.
         /// Called during server startup.
         /// </summary>
         public static void Initialize()
@@ -58,8 +77,11 @@ namespace Server.Sphere51a.Core
             Console.WriteLine("=== Sphere51a Configuration Initialization ===");
             Utility.PopColor();
 
-            // Configure PostgreSQL connection
-            ConfigurePostgresConnection();
+            // Determine which database provider to use
+            SelectDatabaseProvider();
+
+            // Initialize the selected provider
+            InitializeDatabase();
 
             // Load server launch date
             LoadServerLaunchDate();
@@ -67,6 +89,7 @@ namespace Server.Sphere51a.Core
             _isInitialized = true;
 
             Utility.PushColor(ConsoleColor.Green);
+            Console.WriteLine($"[Sphere51a] Database provider: {Provider}");
             Console.WriteLine($"[Sphere51a] Server launch date: {ServerLaunchDate:yyyy-MM-dd HH:mm:ss} UTC");
             Console.WriteLine($"[Sphere51a] Faction changes locked: {IsFactionChangeLocked}");
             if (IsFactionChangeLocked)
@@ -78,117 +101,212 @@ namespace Server.Sphere51a.Core
         }
 
         /// <summary>
-        /// Configure PostgreSQL connection from ModernUO settings.
+        /// Select database provider based on configuration.
+        /// Defaults to SQLite for easy local development.
         /// </summary>
-        private static void ConfigurePostgresConnection()
+        private static void SelectDatabaseProvider()
         {
-            // Try to get connection string from ServerConfiguration
-            // Default fallback if not configured
-            string connectionString = ServerConfiguration.GetSetting(
-                "s51a.postgres.connection",
-                "Host=localhost;Database=sphere51a;Username=s51a;Password=changeme");
+            // Check for explicit provider setting in ModernUO config
+            string providerSetting = ServerConfiguration.GetSetting("s51a.database.provider", "sqlite");
 
-            PostgresConnection.Configure(connectionString);
-
-            // Test connectivity
-            if (PostgresConnection.TestConnection())
+            if (providerSetting.Equals("postgresql", StringComparison.OrdinalIgnoreCase) ||
+                providerSetting.Equals("postgres", StringComparison.OrdinalIgnoreCase))
             {
-                Utility.PushColor(ConsoleColor.Green);
-                Console.WriteLine("[Sphere51a] PostgreSQL connection successful");
-                Utility.PopColor();
+                // Check if PostgreSQL connection string is configured
+                string pgConnectionString = ServerConfiguration.GetSetting("s51a.postgres.connection", "");
 
-                // Run database migrations
-                RunDatabaseMigrations();
+                if (!string.IsNullOrWhiteSpace(pgConnectionString))
+                {
+                    Provider = DatabaseProvider.PostgreSQL;
+                    Console.WriteLine("[Sphere51a] Using PostgreSQL database (production mode)");
+                }
+                else
+                {
+                    Provider = DatabaseProvider.SQLite;
+                    Utility.PushColor(ConsoleColor.Yellow);
+                    Console.WriteLine("[Sphere51a] PostgreSQL requested but no connection string configured");
+                    Console.WriteLine("[Sphere51a] Falling back to SQLite");
+                    Utility.PopColor();
+                }
             }
             else
             {
+                Provider = DatabaseProvider.SQLite;
+                Console.WriteLine("[Sphere51a] Using SQLite database (development mode)");
+            }
+        }
+
+        /// <summary>
+        /// Initialize the selected database provider.
+        /// </summary>
+        private static void InitializeDatabase()
+        {
+            switch (Provider)
+            {
+                case DatabaseProvider.SQLite:
+                    InitializeSqlite();
+                    break;
+
+                case DatabaseProvider.PostgreSQL:
+                    InitializePostgres();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Initialize SQLite database.
+        /// </summary>
+        private static void InitializeSqlite()
+        {
+            try
+            {
+                var repository = new SqliteFactionRepository();
+
+                if (repository.Initialize())
+                {
+                    FactionRepository = repository;
+                    Utility.PushColor(ConsoleColor.Green);
+                    Console.WriteLine("[Sphere51a] SQLite database ready");
+                    Utility.PopColor();
+                }
+                else
+                {
+                    Utility.PushColor(ConsoleColor.Red);
+                    Console.WriteLine("[Sphere51a] ERROR: SQLite initialization failed");
+                    Utility.PopColor();
+                }
+            }
+            catch (Exception ex)
+            {
                 Utility.PushColor(ConsoleColor.Red);
-                Console.WriteLine("[Sphere51a] WARNING: PostgreSQL connection failed - faction system will not work");
+                Console.WriteLine($"[Sphere51a] ERROR: SQLite initialization failed: {ex.Message}");
                 Utility.PopColor();
             }
         }
 
         /// <summary>
-        /// Run database migrations to ensure schema is up to date.
+        /// Initialize PostgreSQL database.
+        /// </summary>
+        private static void InitializePostgres()
+        {
+            try
+            {
+                string connectionString = ServerConfiguration.GetSetting(
+                    "s51a.postgres.connection",
+                    "Host=localhost;Database=sphere51a;Username=s51a;Password=changeme");
+
+                PostgresConnection.Configure(connectionString);
+
+                if (PostgresConnection.TestConnection())
+                {
+                    // Create PostgreSQL repository adapter
+                    FactionRepository = new PostgresFactionRepositoryAdapter();
+
+                    // Run migrations
+                    RunDatabaseMigrations();
+
+                    Utility.PushColor(ConsoleColor.Green);
+                    Console.WriteLine("[Sphere51a] PostgreSQL connection successful");
+                    Utility.PopColor();
+                }
+                else
+                {
+                    Utility.PushColor(ConsoleColor.Yellow);
+                    Console.WriteLine("[Sphere51a] PostgreSQL connection failed - falling back to SQLite");
+                    Utility.PopColor();
+
+                    Provider = DatabaseProvider.SQLite;
+                    InitializeSqlite();
+                }
+            }
+            catch (Exception ex)
+            {
+                Utility.PushColor(ConsoleColor.Yellow);
+                Console.WriteLine($"[Sphere51a] PostgreSQL error: {ex.Message}");
+                Console.WriteLine("[Sphere51a] Falling back to SQLite");
+                Utility.PopColor();
+
+                Provider = DatabaseProvider.SQLite;
+                InitializeSqlite();
+            }
+        }
+
+        /// <summary>
+        /// Run PostgreSQL database migrations.
         /// </summary>
         private static void RunDatabaseMigrations()
         {
             try
             {
-                // Get migration directory path relative to server root
                 var serverRoot = Server.Core.BaseDirectory;
-                var migrationDir = Path.Combine(serverRoot, "Distribution", "Data", "Postgres", "Migrations");
+                var migrationDir = Path.Combine(serverRoot, "Data", "Postgres", "Migrations");
 
-                Utility.PushColor(ConsoleColor.Cyan);
-                Console.WriteLine($"[Sphere51a] Running database migrations from: {migrationDir}");
-                Utility.PopColor();
+                if (!Directory.Exists(migrationDir))
+                {
+                    Console.WriteLine($"[Sphere51a] Migration directory not found: {migrationDir}");
+                    return;
+                }
+
+                Console.WriteLine($"[Sphere51a] Running migrations from: {migrationDir}");
 
                 var appliedCount = MigrationRunner.RunMigrations(migrationDir);
 
                 if (appliedCount > 0)
                 {
-                    Utility.PushColor(ConsoleColor.Green);
                     Console.WriteLine($"[Sphere51a] Applied {appliedCount} migration(s)");
-                    Utility.PopColor();
                 }
 
                 var currentVersion = MigrationRunner.GetCurrentSchemaVersion();
-                Console.WriteLine($"[Sphere51a] Current schema version: {currentVersion}");
+                Console.WriteLine($"[Sphere51a] Schema version: {currentVersion}");
             }
             catch (Exception ex)
             {
-                Utility.PushColor(ConsoleColor.Red);
-                Console.WriteLine($"[Sphere51a] ERROR: Migration failed: {ex.Message}");
+                Utility.PushColor(ConsoleColor.Yellow);
+                Console.WriteLine($"[Sphere51a] Migration warning: {ex.Message}");
                 Utility.PopColor();
-                throw;
             }
         }
 
         /// <summary>
-        /// Load server launch date from PostgreSQL.
-        /// Creates entry on first startup.
+        /// Load server launch date.
+        /// Uses a simple file for SQLite, database for PostgreSQL.
         /// </summary>
         private static void LoadServerLaunchDate()
         {
+            // Use file-based launch date tracking (works with both providers)
+            _launchDateFile = Path.Combine(Server.Core.BaseDirectory, "Saves", "sphere51a_launch.txt");
+
+            if (File.Exists(_launchDateFile))
+            {
+                try
+                {
+                    var dateStr = File.ReadAllText(_launchDateFile).Trim();
+                    ServerLaunchDate = DateTime.Parse(dateStr).ToUniversalTime();
+                    return;
+                }
+                catch
+                {
+                    // Fall through to create new launch date
+                }
+            }
+
+            // First launch - record the date
+            ServerLaunchDate = DateTime.UtcNow;
+
             try
             {
-                using var conn = PostgresConnection.GetConnection();
+                // Ensure directory exists
+                var saveDir = Path.GetDirectoryName(_launchDateFile);
+                if (!Directory.Exists(saveDir))
+                    Directory.CreateDirectory(saveDir);
 
-                // Insert launch date if not exists (first startup)
-                using var insertCmd = new NpgsqlCommand(
-                    @"INSERT INTO s51a_config (key, value, created_at)
-                      VALUES ('server_launch_date', NOW()::TEXT, NOW())
-                      ON CONFLICT (key) DO NOTHING",
-                    conn);
-
-                insertCmd.ExecuteNonQuery();
-
-                // Read launch date
-                using var selectCmd = new NpgsqlCommand(
-                    "SELECT value FROM s51a_config WHERE key = 'server_launch_date'",
-                    conn);
-
-                var result = selectCmd.ExecuteScalar();
-                if (result != null)
-                {
-                    ServerLaunchDate = DateTime.Parse(result.ToString()).ToUniversalTime();
-                }
-                else
-                {
-                    // Fallback: Use current time if database read fails
-                    ServerLaunchDate = DateTime.UtcNow;
-                    Utility.PushColor(ConsoleColor.Yellow);
-                    Console.WriteLine("[Sphere51a] WARNING: Could not read server launch date - using current time");
-                    Utility.PopColor();
-                }
+                File.WriteAllText(_launchDateFile, ServerLaunchDate.ToString("o"));
+                Console.WriteLine("[Sphere51a] First launch - recorded server launch date");
             }
             catch (Exception ex)
             {
-                // Fallback: Use current time if database access fails
-                ServerLaunchDate = DateTime.UtcNow;
-                Utility.PushColor(ConsoleColor.Red);
-                Console.WriteLine($"[Sphere51a] ERROR: Failed to load server launch date: {ex.Message}");
-                Console.WriteLine("[Sphere51a] Using current time as fallback");
+                Utility.PushColor(ConsoleColor.Yellow);
+                Console.WriteLine($"[Sphere51a] Could not save launch date: {ex.Message}");
                 Utility.PopColor();
             }
         }
@@ -197,63 +315,54 @@ namespace Server.Sphere51a.Core
         /// Check if configuration is initialized.
         /// </summary>
         public static bool IsInitialized => _isInitialized;
+    }
 
-        /// <summary>
-        /// Get configuration value from database.
-        /// </summary>
-        /// <param name="key">Configuration key</param>
-        /// <param name="defaultValue">Default value if key not found</param>
-        /// <returns>Configuration value</returns>
-        public static string GetConfigValue(string key, string defaultValue = null)
+    /// <summary>
+    /// Adapter to make the existing static FactionRepository work with the interface.
+    /// This wraps the PostgreSQL-specific implementation.
+    /// </summary>
+    internal class PostgresFactionRepositoryAdapter : IFactionRepository
+    {
+        public string ProviderName => "PostgreSQL";
+
+        public bool Initialize()
         {
-            try
-            {
-                using var conn = PostgresConnection.GetConnection();
-                using var cmd = new NpgsqlCommand(
-                    "SELECT value FROM s51a_config WHERE key = @key",
-                    conn);
-
-                cmd.Parameters.AddWithValue("key", key);
-
-                var result = cmd.ExecuteScalar();
-                return result?.ToString() ?? defaultValue;
-            }
-            catch
-            {
-                return defaultValue;
-            }
+            return Factions.FactionRepository.VerifySchema();
         }
 
-        /// <summary>
-        /// Set configuration value in database.
-        /// </summary>
-        /// <param name="key">Configuration key</param>
-        /// <param name="value">Configuration value</param>
-        /// <returns>True if successful</returns>
-        public static bool SetConfigValue(string key, string value)
+        public bool TestConnection()
         {
-            try
-            {
-                using var conn = PostgresConnection.GetConnection();
-                using var cmd = new NpgsqlCommand(
-                    @"INSERT INTO s51a_config (key, value, created_at, updated_at)
-                      VALUES (@key, @value, NOW(), NOW())
-                      ON CONFLICT (key) DO UPDATE SET value = @value, updated_at = NOW()",
-                    conn);
+            return PostgresConnection.TestConnection();
+        }
 
-                cmd.Parameters.AddWithValue("key", key);
-                cmd.Parameters.AddWithValue("value", value);
+        public Factions.GuildFactionInfo GetGuildFaction(Serial guildSerial)
+        {
+            return Factions.FactionRepository.GetGuildFaction(guildSerial);
+        }
 
-                cmd.ExecuteNonQuery();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Utility.PushColor(ConsoleColor.Red);
-                Console.WriteLine($"[Sphere51a] Failed to set config value '{key}': {ex.Message}");
-                Utility.PopColor();
-                return false;
-            }
+        public System.Collections.Generic.List<Serial> GetFactionGuilds(int factionId)
+        {
+            return Factions.FactionRepository.GetFactionGuilds(factionId);
+        }
+
+        public System.Collections.Generic.Dictionary<int, int> GetFactionStatistics()
+        {
+            return Factions.FactionRepository.GetFactionStatistics();
+        }
+
+        public int GetTotalGuildCount()
+        {
+            return Factions.FactionRepository.GetTotalGuildCount();
+        }
+
+        public bool SetGuildFaction(Serial guildSerial, int factionId)
+        {
+            return Factions.FactionRepository.SetGuildFaction(guildSerial, factionId);
+        }
+
+        public bool RemoveGuildFaction(Serial guildSerial)
+        {
+            return Factions.FactionRepository.RemoveGuildFaction(guildSerial);
         }
     }
 }

@@ -198,6 +198,7 @@ namespace Server.Engines.ConPVP
         {
             // Debug logging - show detailed list of what we're trying to restore
             Console.WriteLine($"[DuelPit] RestoreOriginalEquipment for {_mobile.Name}: {_savedEquipment.Count} equipped items, {_savedBackpackItems.Count} backpack items");
+            Console.WriteLine($"[DuelPit] Current stats - Str: {_mobile.Str}/{_mobile.RawStr}, Dex: {_mobile.Dex}/{_mobile.RawDex}, Int: {_mobile.Int}/{_mobile.RawInt}");
             Console.WriteLine($"[DuelPit] Equipped items to restore:");
             foreach (var item in _savedEquipment)
             {
@@ -213,13 +214,34 @@ namespace Server.Engines.ConPVP
 
             // Restore equipped items
             int restoredEquip = 0;
+            Container backpack = _mobile.Backpack;
+
             foreach (var item in _savedEquipment)
             {
                 if (item != null && !item.Deleted)
                 {
-                    _mobile.EquipItem(item);
-                    restoredEquip++;
-                    Console.WriteLine($"[DuelPit] Successfully restored: {item.GetType().Name} ({item.Name})");
+                    // Try to equip the item
+                    if (_mobile.EquipItem(item))
+                    {
+                        restoredEquip++;
+                        Console.WriteLine($"[DuelPit] Successfully restored: {item.GetType().Name} ({item.Name})");
+                    }
+                    else
+                    {
+                        // If equip fails (e.g., stat requirements not met), put in backpack as fallback
+                        Console.WriteLine($"[DuelPit] WARNING: Failed to equip {item.GetType().Name} ({item.Name}) - placing in backpack (Str: {_mobile.Str})");
+
+                        if (backpack != null)
+                        {
+                            backpack.DropItem(item);
+                        }
+                        else
+                        {
+                            // Last resort: drop at player's feet
+                            Console.WriteLine($"[DuelPit] ERROR: No backpack for {_mobile.Name} - dropping {item.GetType().Name} at feet");
+                            item.MoveToWorld(_mobile.Location, _mobile.Map);
+                        }
+                    }
                 }
                 else
                 {
@@ -229,7 +251,6 @@ namespace Server.Engines.ConPVP
 
             // Restore backpack items
             int restoredBackpack = 0;
-            Container backpack = _mobile.Backpack;
             if (backpack != null)
             {
                 foreach (var item in _savedBackpackItems)

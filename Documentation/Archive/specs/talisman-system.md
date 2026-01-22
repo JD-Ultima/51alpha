@@ -1,21 +1,59 @@
 # Talisman System Technical Specification
 
-PvP/PvM separation, timer mechanics, and Chivalry gating implementation.
+**Status**: DESIGN COMPLETE - Ready for Implementation
+**Last Updated**: 2025-01-15
+**Purpose**: Technical implementation details for talisman system
+**Authority**: TIER 2 - Implementation details for DESIGN_DECISIONS.md §6
+
+> **Authoritative source**: `DESIGN_DECISIONS.md` Section 6 (Talismans)
+> **Related docs**: `PVP_COMBAT_SYSTEM.md` (talisman-gated abilities in combat)
+> **Index**: See `Documentation/INDEX.md` for topic lookup
+
+PvP/PvM separation, timer mechanics, ability gating, and tier structure.
 
 ## Core Design
 
 ### Principle
 
-PvM advantages must not apply in PvP combat. Talismans provide significant PvM bonuses that would unbalance PvP if allowed.
+PvM advantages must not apply in PvP combat. Talismans provide significant PvM bonuses that would unbalance PvP if allowed. Additionally, talismans gate certain abilities in PvP to prevent "do everything" builds.
 
-### Talisman Types
+### Four Talisman Types
 
-| Type | Primary Bonus | Secondary | Chivalry |
-|------|---------------|-----------|----------|
-| Dexer | +15% weapon damage | +5% attack speed | ❌ |
-| Tamer | +15% pet damage | +10% pet healing | ❌ |
-| Sampire | +10% life leech | Chivalry access | ✅ |
-| Treasure Hunter | +15% chest quality | +25% gold find | ❌ |
+| Type | Build Archetype | PvM Bonuses | PvP-Gated Abilities |
+|------|-----------------|-------------|---------------------|
+| **Dexer** | Pure melee | +15% weapon damage, +5% attack speed | Bushido, Weapon Special Moves |
+| **Tamer** | Pet master | +15% pet damage, +10% pet healing | Taming bonuses |
+| **Sampire** | Paladin | +10% life leech | Chivalry, Necromancy |
+| **Treasure Hunter** | Explorer | +15% chest quality, +25% gold find | Lockpicking bonuses |
+
+### Three Tiers Per Type
+
+Each of the 4 talisman types has 3 tiers (T3 → T2 → T1):
+
+| Tier | Name Pattern | Relic Cost | Mage Stones | Crafting Failure | Timer |
+|------|--------------|------------|-------------|------------------|-------|
+| T3 | "Bloodthorn" | 5 Common | 1 | 30% at 80 skill | 7 days gameplay |
+| T2 | "Bloodmage" | 8 Uncommon + 3 Common | 3 | 40% at 100 skill | 7 days gameplay |
+| T1 | "Bloodlord" | 10 Rare + 5 Uncommon + 1 Legendary | 5 | 50% at 120 skill | 7 days gameplay |
+
+**Mage Stones:** Specific relic drops from dungeon mobs, required as talisman crafting ingredient.
+
+### Skill Reduction Mechanic
+
+**CRITICAL:** When a talisman is equipped, it **reduces ALL OTHER skills to 0**.
+
+This creates OSI 7-skill style template builds where players must commit to a specific playstyle:
+- Dexer Talisman: Keep melee/combat skills, lose mage/craft skills
+- Tamer Talisman: Keep taming/vet skills, lose combat skills
+- Sampire Talisman: Keep chiv/necro skills, structured around paladin build
+- TH Talisman: Keep lockpicking/cartography, lose combat skills
+
+### PvP Behavior
+
+1. **On PvP Flag:** Talisman instantly drops to backpack
+2. **Gated Abilities Disabled:** ALL abilities gated by that talisman stop working
+3. **5-Minute Cooldown:** Cannot re-equip for 5 minutes after PvP engagement
+4. **PvM Unaffected:** All abilities work normally vs monsters
 
 ---
 
